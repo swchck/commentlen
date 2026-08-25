@@ -1,0 +1,88 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+    tags: ['v*']
+  pull_request:
+
+permissions:
+  contents: read
+
+env:
+  # must match the version in .custom-gcl.yml: golangci-lint refuses to build a
+  # custom binary for a different one
+  GOLANGCI_VERSION: v2.11.4
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # 1.25 is the floor from go.mod, stable is what most people run
+        go: ['1.25', 'stable']
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version: ${{ matrix.go }}
+      - run: go build ./...
+      - run: go vet ./...
+      - run: go test -race ./...
+      - name: check gofmt
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "not gofmt'd:"; echo "$unformatted"; exit 1
+          fi
+      - name: check go.mod is tidy
+        run: |
+          go mod tidy -diff
+
+  fuzz:
+    # the prefilter is the one place a bug means silently dropping diagnostics
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version: stable
+      - run: go test ./analyzer/ -run FuzzPrefilter -fuzz FuzzPrefilter -fuzztime 60s
+      - name: upload failing corpus
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-corpus
+          path: analyzer/testdata/fuzz/
+
+  dogfood:
+    # builds the plugin into golangci-lint and points it at this repository: the
+    # linter is expected to pass its own strict profile
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version: stable
+      - name: install golangci-lint
+        run: go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@${{ env.GOLANGCI_VERSION }}
+      - name: build the custom binary
+        run: golangci-lint custom
+      - name: lint this repository with it
+        run: ./bin/golangci-lint-commentlen run ./...
+      - name: standalone binary reports and stays quiet as expected
+        run: |
+          set -euo pipefail
+          go build -o bin/commentlen ./cmd/commentlen
+          bin=$PWD/bin/commentlen
+          work=$(mktemp -d)
+          printf 'module smoke\n\ngo 1.25\n' > "$work/go.mod"
+          printf '// Package smoke is clean.\npackage smoke\n' > "$work/smoke.go"
+          cd "$work"
+          "$bin" -preset strict ./...
+          printf '// Package smoke is clean.\npackage smoke\n\n// F does a thing\nfunc F() {}\n' > smoke.go
+          if "$bin" -preset strict ./...; then
+            echo "the missing period should have been reported"
+            exit 1
+          fi

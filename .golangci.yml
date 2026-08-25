@@ -6,6 +6,12 @@ linters:
   enable:
     - commentlen
   settings:
+    staticcheck:
+      checks:
+        - all
+        # QF1001 wants De Morgan's law applied to goDirective, which is copied
+        # from go/ast verbatim so the two can be compared line by line
+        - -QF1001
     custom:
       commentlen:
         type: module

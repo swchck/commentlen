@@ -1,5 +1,9 @@
 # commentlen
 
+[![CI](https://github.com/swchck/commentlen/actions/workflows/ci.yml/badge.svg)](https://github.com/swchck/commentlen/actions/workflows/ci.yml)
+[![Go Reference](https://pkg.go.dev/badge/github.com/swchck/commentlen.svg)](https://pkg.go.dev/github.com/swchck/commentlen)
+[![Go Report Card](https://goreportcard.com/badge/github.com/swchck/commentlen)](https://goreportcard.com/report/github.com/swchck/commentlen)
+
 A configurable size and shape linter for Go comments, usable as a golangci-lint
 module plugin or as a standalone binary.
 
