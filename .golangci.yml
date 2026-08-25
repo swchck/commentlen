@@ -1,0 +1,31 @@
+version: "2"
+
+# The linter runs on its own source. Build the binary with `make custom` and run
+# ./bin/golangci-lint-commentlen run.
+linters:
+  enable:
+    - commentlen
+  settings:
+    custom:
+      commentlen:
+        type: module
+        description: size and shape limits for Go comments
+        original-url: github.com/swchck/commentlen
+        settings:
+          preset: strict
+          kinds:
+            trailing:
+              # the test tables in this repo annotate expectations at line ends
+              forbidden: false
+              max-lines: 1
+              max-width: 100
+          style:
+            patterns-extra:
+              - pattern: '\b[A-Z]{2,10}-\d{1,6}\b'
+                message: ticket key in a comment — explain the reason instead
+
+  exclusions:
+    rules:
+      # the test data is written to violate the rules on purpose
+      - path: '_test\.go'
+        linters: [commentlen]

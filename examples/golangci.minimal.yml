@@ -1,0 +1,16 @@
+version: "2"
+
+# The smallest useful configuration: keep the defaults, cap inline comments at
+# two lines, and leave everything else alone.
+linters:
+  enable:
+    - commentlen
+  settings:
+    custom:
+      commentlen:
+        type: module
+        description: size and shape limits for Go comments
+        settings:
+          kinds:
+            inline:
+              max-lines: 2

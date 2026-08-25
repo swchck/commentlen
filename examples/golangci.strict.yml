@@ -1,0 +1,75 @@
+version: "2"
+
+linters:
+  enable:
+    - commentlen
+  settings:
+    custom:
+      commentlen:
+        type: module
+        description: size and shape limits for Go comments
+        original-url: github.com/swchck/commentlen
+        settings:
+          preset: strict
+
+          skip-generated: true
+          exclude-files:
+            - '/vendor/'
+            - '\.pb\.go$'
+            - '\.gen\.go$'
+          exclude-patterns:
+            - '^SPDX-License-Identifier:'
+            - '^Copyright '
+
+          kinds:
+            package:
+              max-lines: 0
+              max-width: 100
+            exported:
+              max-lines: 6
+              max-width: 100
+            unexported:
+              max-lines: 2
+              max-width: 100
+            field:
+              max-lines: 1
+              max-width: 100
+            inline:
+              max-lines: 2
+              max-width: 100
+            trailing:
+              forbidden: true
+            other:
+              max-lines: 2
+              max-width: 100
+
+          max-inline-per-func: 2
+
+          ratio:
+            enabled: true
+            max: 1.0
+            min-code-lines: 2
+            kinds: [inline, unexported, other]
+
+          style:
+            tags: [TODO, FIXME, HACK, XXX, OPTIMIZE]
+            banners: true
+            metadata: true
+            commented-code: true
+            patterns-extra:
+              - pattern: '\b[A-Z]{2,10}-\d{1,6}\b'
+                message: ticket key in a comment — explain the reason instead
+
+          godoc:
+            enabled: true
+            scope: exported
+
+  exclusions:
+    rules:
+      # generated code the linter cannot recognize by its header
+      - path: 'zz_generated\..*\.go'
+        linters: [commentlen]
+      # test tables carry long expectation comments on purpose
+      - path: '_test\.go'
+        text: 'trailing comments are not allowed'
+        linters: [commentlen]

@@ -1,0 +1,12 @@
+version: v2.11.4
+name: golangci-lint-commentlen
+destination: ./bin
+
+plugins:
+  # Local checkout: use this while developing the plugin.
+  - module: github.com/swchck/commentlen
+    path: .
+
+  # Published version: use this in a real project instead of the local path.
+  # - module: github.com/swchck/commentlen
+  #   version: v0.1.0

@@ -1,0 +1,70 @@
+# Settings for the standalone binary (cmd/commentlen). The same block goes under
+# linters.settings.custom.commentlen.settings in .golangci.yml.
+#
+# This is the strict profile: it encodes "comments earn their place" — inline
+# notes stay at two lines and never outgrow the code they explain, end-of-line
+# comments are gone except on fields, and doc comments follow the godoc contract.
+preset: strict
+
+skip-generated: true
+skip-tests: false
+
+exclude-files:
+  - '/vendor/'
+  - '\.pb\.go$'
+  - '\.gen\.go$'
+  - '_generated\.go$'
+
+exclude-patterns:
+  - '^SPDX-License-Identifier:'
+  - '^Copyright '
+
+kinds:
+  package:
+    max-lines: 0 # a package doc explains the contract; length is allowed there
+    max-width: 100
+  exported:
+    max-lines: 6
+    max-width: 100
+  unexported:
+    max-lines: 2
+    max-width: 100
+  field:
+    max-lines: 1
+    max-width: 100
+  inline:
+    max-lines: 2
+    max-width: 100
+  trailing:
+    forbidden: true # units and value notes belong on fields, which are their own kind
+  other:
+    max-lines: 2
+    max-width: 100
+
+max-inline-per-func: 2
+
+ratio:
+  enabled: true
+  max: 1.0
+  min-code-lines: 2
+  kinds: [inline, unexported, other]
+
+style:
+  tags: [TODO, FIXME, HACK, XXX, OPTIMIZE]
+  banners: true
+  metadata: true
+  commented-code: true
+  commented-code-min-lines: 2
+  patterns-extra:
+    - pattern: '\b[A-Z]{2,10}-\d{1,6}\b'
+      message: ticket key in a comment — explain the reason instead, links are an appendix
+    - pattern: '(?i)\b(sprint|epic)\s+\d+'
+      message: sprint or epic name in a comment — it will outlive the sprint
+
+godoc:
+  enabled: true
+  starts-with-name: true
+  capitalized: true
+  ends-with-period: true
+  reports-whether: true
+  scope: exported
