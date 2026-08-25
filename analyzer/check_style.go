@@ -27,8 +27,8 @@ var codeishRe = regexp.MustCompile(`^\s*(?:` +
 	`[\w.]+\([^()]*\)\s*[;{]?\s*$` +
 	`)`)
 
-func (r *runner) checkStyle(pass *analysis.Pass, info *commentInfo, sc *scratch) {
-	st := &r.cfg.style
+func checkStyle(pass *analysis.Pass, fc *fileContext, info *commentInfo, sc *scratch) {
+	st := &fc.cfg.style
 	if st.tags == nil && len(st.patterns) == 0 && !st.banners && !st.metadata && !st.commentedCode {
 		return
 	}
@@ -41,7 +41,7 @@ func (r *runner) checkStyle(pass *analysis.Pass, info *commentInfo, sc *scratch)
 		}
 	}
 	if st.commentedCode {
-		r.reportCommentedCode(pass, info)
+		reportCommentedCode(pass, st, info)
 	}
 
 	text := info.prose(sc)
@@ -68,8 +68,8 @@ func (r *runner) checkStyle(pass *analysis.Pass, info *commentInfo, sc *scratch)
 
 // reportCommentedCode looks for a run of consecutive code-looking lines, long
 // enough that prose is an unlikely explanation.
-func (r *runner) reportCommentedCode(pass *analysis.Pass, info *commentInfo) {
-	need := r.cfg.style.commentedCodeMinLines
+func reportCommentedCode(pass *analysis.Pass, st *styleConfig, info *commentInfo) {
+	need := st.commentedCodeMinLines
 	run, start := 0, 0
 	flush := func() {
 		if run >= need {

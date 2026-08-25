@@ -85,7 +85,7 @@ name: golangci-lint-commentlen
 destination: ./bin
 plugins:
   - module: github.com/swchck/commentlen
-    version: v0.1.1
+    version: v0.2.0
 ```
 
 Then build it and enable the linter in `.golangci.yml`:
@@ -228,6 +228,41 @@ a user" is prose, not an abandoned task. The built-in phrase list covers hedging
 preambles ("Note that", "It's important to note"), the "not just X, but Y"
 construction, vague abstraction ("for performance reasons", "to ensure
 correctness") and signature-restating openings.
+
+### Per-path overrides
+
+An override is a settings layer applied to the files whose path matches, and the
+first matching entry wins — order them from most to least specific. Anything a
+layer does not mention is inherited, so limits can be relaxed without losing the
+content rules:
+
+```yaml
+preset: strict
+overrides:
+  # test prose is longer by nature, but a TODO or the wrong language is just as
+  # unwelcome there as in production code
+  - path: '_test\.go$'
+    defaults:
+      max-lines: 0        # 0 lifts every length cap at once
+    ratio:
+      enabled: false
+      max-inline-per-func: 0
+  # a package that documents a protocol may keep long doc comments
+  - path: '^internal/wire/'
+    kinds:
+      exported:
+        max-lines: 20
+```
+
+An override accepts every key of the top-level settings except `preset`,
+`overrides` themselves, and the four that select which files are looked at at
+all (`skip-generated`, `skip-tests`, `exclude-files`, `generated-extra`) — those
+stay global. Overrides can tighten as well as relax.
+
+Note the difference from golangci-lint's own `exclusions`: those filter finished
+diagnostics by message text, which breaks when the wording changes, and they do
+not exist at all when the standalone binary runs. An override changes what the
+linter looks for in the first place.
 
 ### Godoc
 

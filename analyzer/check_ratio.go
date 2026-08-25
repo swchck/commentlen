@@ -9,8 +9,9 @@ import (
 )
 
 // checkRatio enforces "a comment is never longer than the code it describes".
-func (r *runner) checkRatio(pass *analysis.Pass, fc *fileContext, info *commentInfo) {
-	if !r.cfg.ratio.enabled || !r.cfg.ratio.kinds[info.kind] || info.counted == 0 {
+func checkRatio(pass *analysis.Pass, fc *fileContext, info *commentInfo) {
+	cfg := fc.cfg
+	if !cfg.ratio.enabled || !cfg.ratio.kinds[info.kind] || info.counted == 0 {
 		return
 	}
 
@@ -20,15 +21,15 @@ func (r *runner) checkRatio(pass *analysis.Pass, fc *fileContext, info *commentI
 	} else if info.target.codeStart.IsValid() && info.target.codeEnd.IsValid() {
 		codeLines = fc.lineSpan(info.target.codeStart, info.target.codeEnd)
 	}
-	if codeLines < r.cfg.ratio.minCodeLines {
+	if codeLines < cfg.ratio.minCodeLines {
 		return
 	}
-	if float64(info.counted) <= float64(codeLines)*r.cfg.ratio.max {
+	if float64(info.counted) <= float64(codeLines)*cfg.ratio.max {
 		return
 	}
 	pass.Reportf(info.group.Pos(),
 		"%s comment is %s for %s of code, max ratio %.2g — say less, or extract the code",
-		info.kind, plural(info.counted, "line"), plural(codeLines, "line"), r.cfg.ratio.max)
+		info.kind, plural(info.counted, "line"), plural(codeLines, "line"), cfg.ratio.max)
 }
 
 func plural(n int, unit string) string {

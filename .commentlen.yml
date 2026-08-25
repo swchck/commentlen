@@ -30,13 +30,17 @@ kinds:
     max-lines: 2
     max-width: 100
   field:
-    max-lines: 1
+    max-lines: 2
     max-width: 100
   inline:
     max-lines: 2
     max-width: 100
   trailing:
-    forbidden: true # units and value notes belong on fields, which are their own kind
+    # this repo keeps end-of-line notes for units and one-line asides; drop this
+    # block to get the strict preset's outright ban back
+    forbidden: false
+    max-lines: 1
+    max-width: 100
   other:
     max-lines: 2
     max-width: 100
@@ -68,3 +72,16 @@ godoc:
   ends-with-period: true
   reports-whether: true
   scope: exported
+
+# Tests get the same content rules with the length caps lifted: a test comment
+# explains a scenario and is longer by nature.
+overrides:
+  - path: '_test\.go$'
+    defaults:
+      max-lines: 0
+    kinds:
+      trailing:
+        forbidden: false # test tables annotate expectations at line ends
+    ratio:
+      enabled: false
+    max-inline-per-func: 0

@@ -94,7 +94,7 @@ func (r *runner) checkFile(pass *analysis.Pass, file *ast.File, sc *scratch) {
 		return // an unreadable file is the build's problem, not the linter's
 	}
 
-	fc := newFileContext(r.cfg, pass.Fset, tf, src, file, sc)
+	fc := newFileContext(r.configFor(name), pass.Fset, tf, src, file, sc)
 	if fc.fileDisabled {
 		return
 	}
@@ -106,7 +106,7 @@ func (r *runner) checkFile(pass *analysis.Pass, file *ast.File, sc *scratch) {
 			continue
 		}
 		kind, target := fc.classify(group)
-		kc := &r.cfg.kinds[kind]
+		kc := &fc.cfg.kinds[kind]
 		if kc.disabled {
 			continue
 		}
@@ -114,10 +114,10 @@ func (r *runner) checkFile(pass *analysis.Pass, file *ast.File, sc *scratch) {
 		if len(info.lines) == 0 {
 			continue
 		}
-		if r.cfg.ignoreDirectives && info.allDirectives {
+		if fc.cfg.ignoreDirectives && info.allDirectives {
 			continue
 		}
-		if r.excluded(info, sc) {
+		if excluded(fc, info, sc) {
 			continue
 		}
 
@@ -131,12 +131,27 @@ func (r *runner) checkFile(pass *analysis.Pass, file *ast.File, sc *scratch) {
 			pass.Reportf(group.Pos(), "%s comments are not allowed", kind)
 			continue
 		}
-		r.checkSize(pass, fc, info, kc)
-		r.checkRatio(pass, fc, info)
-		r.checkStyle(pass, info, sc)
-		r.checkGodoc(pass, fc, info, sc)
+		checkSize(pass, fc, info, kc)
+		checkRatio(pass, fc, info)
+		checkStyle(pass, fc, info, sc)
+		checkGodoc(pass, fc, info, sc)
 	}
-	r.checkInlineBudget(pass, fc, inline)
+	checkInlineBudget(pass, fc, inline)
+}
+
+// configFor returns the settings that apply to one file: the first matching
+// override, or the base config.
+func (r *runner) configFor(name string) *config {
+	if len(r.cfg.overrides) == 0 {
+		return r.cfg
+	}
+	slashed := filepath.ToSlash(name)
+	for i := range r.cfg.overrides {
+		if r.cfg.overrides[i].re.MatchString(slashed) {
+			return r.cfg.overrides[i].cfg
+		}
+	}
+	return r.cfg
 }
 
 func (r *runner) skipPath(name string) bool {
@@ -155,12 +170,12 @@ func (r *runner) skipPath(name string) bool {
 	return false
 }
 
-func (r *runner) excluded(info *commentInfo, sc *scratch) bool {
-	if len(r.cfg.excludeComments) == 0 {
+func excluded(fc *fileContext, info *commentInfo, sc *scratch) bool {
+	if len(fc.cfg.excludeComments) == 0 {
 		return false
 	}
 	text := info.prose(sc)
-	for _, re := range r.cfg.excludeComments {
+	for _, re := range fc.cfg.excludeComments {
 		if re.MatchString(text) {
 			return true
 		}

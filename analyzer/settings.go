@@ -65,6 +65,24 @@ type Settings struct {
 	Ratio RatioSettings `json:"ratio"`
 	Style StyleSettings `json:"style"`
 	Godoc GodocSettings `json:"godoc"`
+
+	// Overrides relax or tighten the settings for the files matching a path.
+	// The first matching entry wins, so order them from most to least specific.
+	Overrides []Override `json:"overrides"`
+}
+
+// Override is a settings layer applied to the files whose path matches Path.
+// It accepts every key of Settings except preset, overrides, and the four that
+// select files at all: skip-generated, skip-tests, exclude-files and
+// generated-extra.
+//
+// The typical use is lifting the size limits in tests while keeping the content
+// rules, which apply to test prose just as much.
+type Override struct {
+	// Path is a regexp matched against the slash-separated file path.
+	Path string `json:"path"`
+
+	Settings
 }
 
 // KindSettings are the size limits of one comment kind.
@@ -205,6 +223,15 @@ type config struct {
 	godoc godocConfig
 
 	needsStmts bool
+
+	// overrides are consulted in order; the first match replaces this config
+	// wholesale for that file.
+	overrides []pathConfig
+}
+
+type pathConfig struct {
+	re  *regexp.Regexp
+	cfg *config
 }
 
 func boolOr(p *bool, def bool) bool {
@@ -365,35 +392,151 @@ func newConfig(s Settings) (*config, error) {
 		return nil, err
 	}
 
+	cfg := baseConfig(p)
+	if err := cfg.apply(s, ""); err != nil {
+		return nil, err
+	}
+
+	for i := range s.Overrides {
+		ov := &s.Overrides[i]
+		where := fmt.Sprintf("overrides[%d]", i)
+		if err := validateOverride(ov, where); err != nil {
+			return nil, err
+		}
+		re, err := regexp.Compile(ov.Path)
+		if err != nil {
+			return nil, fmt.Errorf("%s.path: bad regexp %q: %w", where, ov.Path, err)
+		}
+		child := cfg.clone()
+		if err := child.apply(ov.Settings, where+"."); err != nil {
+			return nil, err
+		}
+		cfg.overrides = append(cfg.overrides, pathConfig{re: re, cfg: child})
+	}
+	return cfg, nil
+}
+
+func validateOverride(ov *Override, where string) error {
+	switch {
+	case ov.Path == "":
+		return fmt.Errorf("%s: path is required", where)
+	case ov.Preset != "":
+		return fmt.Errorf("%s: preset belongs at the top level", where)
+	case len(ov.Overrides) > 0:
+		return fmt.Errorf("%s: overrides cannot nest", where)
+	case ov.SkipGenerated != nil, ov.SkipTests != nil, len(ov.ExcludeFiles) > 0, len(ov.GeneratedExtra) > 0:
+		return fmt.Errorf("%s: file selection (skip-generated, skip-tests, exclude-files, generated-extra) is global", where)
+	}
+	return nil
+}
+
+// baseConfig is the preset expanded into concrete values, before any user
+// setting is layered on top.
+func baseConfig(p preset) *config {
 	cfg := &config{
-		skipGenerated:       boolOr(s.SkipGenerated, true),
-		skipTests:           boolOr(s.SkipTests, false),
-		ignoreDirectives:    boolOr(s.IgnoreDirectives, true),
-		ignoreURLs:          boolOr(s.IgnoreURLs, true),
-		ignoreCodeBlocks:    boolOr(s.IgnoreCodeBlocks, true),
-		countBlankLines:     boolOr(s.CountBlankLines, false),
-		widthIncludesIndent: boolOr(s.WidthIncludesIndent, true),
+		skipGenerated:       true,
+		ignoreDirectives:    true,
+		ignoreURLs:          true,
+		ignoreCodeBlocks:    true,
+		widthIncludesIndent: true,
+		directivePrefixes:   defaultDirectivePrefixes,
 		kinds:               p.kinds,
-		maxInlinePerFunc:    intOr(s.MaxInlinePerFunc, p.maxInlinePerFunc),
+		maxInlinePerFunc:    p.maxInlinePerFunc,
+		ratio: ratioConfig{
+			enabled:      p.ratioEnabled,
+			max:          1.0,
+			minCodeLines: 2,
+		},
+		style: styleConfig{
+			banners:               p.style,
+			metadata:              p.style,
+			commentedCode:         p.style,
+			commentedCodeMinLines: 2,
+		},
+		godoc: godocConfig{
+			enabled:        p.godoc,
+			startsWithName: true,
+			capitalized:    true,
+			endsWithPeriod: true,
+			reportsWhether: true,
+			allSymbols:     p.godocAll,
+		},
 	}
+	for _, name := range p.ratioKinds {
+		if k, ok := parseKind(name); ok {
+			cfg.ratio.kinds[k] = true
+		}
+	}
+	if p.style {
+		cfg.style.tags, cfg.style.tagsPre = compileTags(defaultBannedTags)
+		cfg.style.patterns, _ = compilePatterns(defaultBannedPatterns, nil)
+	}
+	cfg.needsStmts = cfg.ratio.enabled
+	return cfg
+}
 
-	if cfg.excludeFiles, err = compileAll(s.ExcludeFiles, "exclude-files"); err != nil {
-		return nil, err
-	}
-	if cfg.excludeComments, err = compileAll(s.ExcludePatterns, "exclude-patterns"); err != nil {
-		return nil, err
-	}
-	if cfg.generatedExtra, err = compileAll(s.GeneratedExtra, "generated-extra"); err != nil {
-		return nil, err
-	}
+// clone copies a config deeply enough that apply cannot write through to the
+// original: the arrays are values, and the slices are capped so append copies.
+func (cfg *config) clone() *config {
+	c := *cfg
+	c.overrides = nil
+	c.style.patterns = c.style.patterns[:len(c.style.patterns):len(c.style.patterns)]
+	c.directivePrefixes = c.directivePrefixes[:len(c.directivePrefixes):len(c.directivePrefixes)]
+	return &c
+}
 
-	cfg.directivePrefixes = defaultDirectivePrefixes
+// apply layers one Settings value on top of the config; a nil field leaves the
+// current value alone. The where prefix names the block in error messages.
+func (cfg *config) apply(s Settings, where string) error {
+	cfg.skipGenerated = boolOr(s.SkipGenerated, cfg.skipGenerated)
+	cfg.skipTests = boolOr(s.SkipTests, cfg.skipTests)
+	cfg.ignoreDirectives = boolOr(s.IgnoreDirectives, cfg.ignoreDirectives)
+	cfg.ignoreURLs = boolOr(s.IgnoreURLs, cfg.ignoreURLs)
+	cfg.ignoreCodeBlocks = boolOr(s.IgnoreCodeBlocks, cfg.ignoreCodeBlocks)
+	cfg.countBlankLines = boolOr(s.CountBlankLines, cfg.countBlankLines)
+	cfg.widthIncludesIndent = boolOr(s.WidthIncludesIndent, cfg.widthIncludesIndent)
+	cfg.maxInlinePerFunc = intOr(s.MaxInlinePerFunc, cfg.maxInlinePerFunc)
+
+	var err error
+	if s.ExcludeFiles != nil {
+		if cfg.excludeFiles, err = compileAll(s.ExcludeFiles, where+"exclude-files"); err != nil {
+			return err
+		}
+	}
+	if s.ExcludePatterns != nil {
+		if cfg.excludeComments, err = compileAll(s.ExcludePatterns, where+"exclude-patterns"); err != nil {
+			return err
+		}
+	}
+	if s.GeneratedExtra != nil {
+		if cfg.generatedExtra, err = compileAll(s.GeneratedExtra, where+"generated-extra"); err != nil {
+			return err
+		}
+	}
 	if len(s.DirectivePrefixesExtra) > 0 {
-		cfg.directivePrefixes = make([]string, 0, len(defaultDirectivePrefixes)+len(s.DirectivePrefixesExtra))
-		cfg.directivePrefixes = append(cfg.directivePrefixes, defaultDirectivePrefixes...)
 		cfg.directivePrefixes = append(cfg.directivePrefixes, s.DirectivePrefixesExtra...)
 	}
 
+	if err := cfg.applyKinds(s, where); err != nil {
+		return err
+	}
+	if cfg.maxInlinePerFunc < 0 {
+		return fmt.Errorf("%smax-inline-per-func must not be negative", where)
+	}
+	if err := cfg.applyRatio(s.Ratio, where); err != nil {
+		return err
+	}
+	if err := cfg.applyStyle(s.Style, where); err != nil {
+		return err
+	}
+	if err := cfg.applyGodoc(s.Godoc, where); err != nil {
+		return err
+	}
+	cfg.needsStmts = cfg.ratio.enabled
+	return nil
+}
+
+func (cfg *config) applyKinds(s Settings, where string) error {
 	applyKind := func(k Kind, ks KindSettings) {
 		c := &cfg.kinds[k]
 		c.disabled = boolOr(ks.Disabled, c.disabled)
@@ -407,126 +550,134 @@ func newConfig(s Settings) (*config, error) {
 	for name, ks := range s.Kinds {
 		k, ok := parseKind(name)
 		if !ok {
-			return nil, fmt.Errorf("kinds: unknown kind %q: want one of %s", name, strings.Join(KindNames(), ", "))
+			return fmt.Errorf("%skinds: unknown kind %q: want one of %s", where, name, strings.Join(KindNames(), ", "))
 		}
 		applyKind(k, ks)
 	}
 	for k := Kind(0); int(k) < numKinds; k++ {
 		if c := cfg.kinds[k]; c.maxLines < 0 || c.maxWidth < 0 {
-			return nil, fmt.Errorf("kinds.%s: max-lines and max-width must not be negative", k)
+			return fmt.Errorf("%skinds.%s: max-lines and max-width must not be negative", where, k)
 		}
 	}
-	if cfg.maxInlinePerFunc < 0 {
-		return nil, fmt.Errorf("max-inline-per-func must not be negative")
-	}
-
-	if err := cfg.applyRatio(s.Ratio, p); err != nil {
-		return nil, err
-	}
-	if err := cfg.applyStyle(s.Style, p); err != nil {
-		return nil, err
-	}
-	cfg.applyGodoc(s.Godoc, p)
-
-	cfg.needsStmts = cfg.ratio.enabled
-	return cfg, nil
+	return nil
 }
 
-func (cfg *config) applyRatio(s RatioSettings, p preset) error {
-	cfg.ratio.enabled = boolOr(s.Enabled, p.ratioEnabled)
-	cfg.ratio.max = floatOr(s.Max, 1.0)
-	cfg.ratio.minCodeLines = intOr(s.MinCodeLines, 2)
+func (cfg *config) applyRatio(s RatioSettings, where string) error {
+	cfg.ratio.enabled = boolOr(s.Enabled, cfg.ratio.enabled)
+	cfg.ratio.max = floatOr(s.Max, cfg.ratio.max)
+	cfg.ratio.minCodeLines = intOr(s.MinCodeLines, cfg.ratio.minCodeLines)
 	if cfg.ratio.max <= 0 {
-		return fmt.Errorf("ratio.max must be positive")
+		return fmt.Errorf("%sratio.max must be positive", where)
 	}
-
-	names := s.Kinds
-	if names == nil {
-		names = p.ratioKinds
+	if s.Kinds == nil {
+		return nil
 	}
-	for _, name := range names {
+	cfg.ratio.kinds = [numKinds]bool{}
+	for _, name := range s.Kinds {
 		k, ok := parseKind(name)
 		if !ok {
-			return fmt.Errorf("ratio.kinds: unknown kind %q: want one of %s", name, strings.Join(KindNames(), ", "))
+			return fmt.Errorf("%sratio.kinds: unknown kind %q: want one of %s", where, name, strings.Join(KindNames(), ", "))
 		}
 		cfg.ratio.kinds[k] = true
 	}
 	return nil
 }
 
-func (cfg *config) applyStyle(s StyleSettings, p preset) error {
-	cfg.style.banners = boolOr(s.Banners, p.style)
-	cfg.style.metadata = boolOr(s.Metadata, p.style)
-	cfg.style.commentedCode = boolOr(s.CommentedCode, p.style)
-	cfg.style.commentedCodeMinLines = intOr(s.CommentedCodeMinLines, 2)
-	if cfg.style.commentedCodeMinLines < 1 {
-		return fmt.Errorf("style.commented-code-min-lines must be at least 1")
-	}
-
-	if boolOr(s.TagsEnabled, p.style) {
-		tags := s.Tags
-		if tags == nil {
-			tags = defaultBannedTags
-		}
-		if len(tags) > 0 {
-			quoted := make([]string, 0, len(tags))
-			for _, t := range tags {
-				if t == "" {
-					continue
-				}
-				quoted = append(quoted, regexp.QuoteMeta(t))
-			}
-			// tags are only tags at the head of a line or before a colon; the word
-			// "todo" inside a sentence is prose, not an abandoned task
-			sort.Strings(quoted)
-			pattern := `(?m)(?:^|\s)(` + strings.Join(quoted, "|") + `)\b\s*[:(]?`
-			re, err := regexp.Compile(pattern)
-			if err != nil {
-				return fmt.Errorf("style.tags: %w", err)
-			}
-			cfg.style.tags = re
-			cfg.style.tagsPre = newPrefilter(pattern)
+// compileTags turns a tag list into the regexp that finds one. A tag only counts
+// at the head of a line or before a colon, so "the todos of a user" is prose.
+func compileTags(tags []string) (*regexp.Regexp, prefilter) {
+	quoted := make([]string, 0, len(tags))
+	for _, tag := range tags {
+		if tag != "" {
+			quoted = append(quoted, regexp.QuoteMeta(tag))
 		}
 	}
-
-	var raw []BannedPattern
-	if s.Patterns != nil {
-		raw = s.Patterns
-	} else if boolOr(s.UseDefaultPatterns, p.style) {
-		raw = defaultBannedPatterns
+	if len(quoted) == 0 {
+		return nil, prefilter{}
 	}
-	raw = append(raw[:len(raw):len(raw)], s.PatternsExtra...)
+	sort.Strings(quoted)
+	pattern := `(?m)(?:^|\s)(` + strings.Join(quoted, "|") + `)\b\s*[:(]?`
+	return regexp.MustCompile(pattern), newPrefilter(pattern)
+}
 
-	cfg.style.patterns = make([]bannedPattern, 0, len(raw))
-	for _, bp := range raw {
+func compilePatterns(list, extra []BannedPattern) ([]bannedPattern, error) {
+	out := make([]bannedPattern, 0, len(list)+len(extra))
+	for _, bp := range append(list[:len(list):len(list)], extra...) {
 		if bp.Pattern == "" {
-			return fmt.Errorf("style.patterns: empty pattern")
+			return nil, fmt.Errorf("empty pattern")
 		}
 		re, err := regexp.Compile(bp.Pattern)
 		if err != nil {
-			return fmt.Errorf("style.patterns: bad regexp %q: %w", bp.Pattern, err)
+			return nil, fmt.Errorf("bad regexp %q: %w", bp.Pattern, err)
 		}
 		msg := bp.Message
 		if msg == "" {
 			msg = fmt.Sprintf("matches banned pattern %q", bp.Pattern)
 		}
-		cfg.style.patterns = append(cfg.style.patterns, bannedPattern{
-			re:      re,
-			pre:     newPrefilter(bp.Pattern),
-			message: msg,
-		})
+		out = append(out, bannedPattern{re: re, pre: newPrefilter(bp.Pattern), message: msg})
+	}
+	return out, nil
+}
+
+func (cfg *config) applyStyle(s StyleSettings, where string) error {
+	cfg.style.banners = boolOr(s.Banners, cfg.style.banners)
+	cfg.style.metadata = boolOr(s.Metadata, cfg.style.metadata)
+	cfg.style.commentedCode = boolOr(s.CommentedCode, cfg.style.commentedCode)
+	cfg.style.commentedCodeMinLines = intOr(s.CommentedCodeMinLines, cfg.style.commentedCodeMinLines)
+	if cfg.style.commentedCodeMinLines < 1 {
+		return fmt.Errorf("%sstyle.commented-code-min-lines must be at least 1", where)
+	}
+
+	switch {
+	case s.TagsEnabled != nil && !*s.TagsEnabled:
+		cfg.style.tags, cfg.style.tagsPre = nil, prefilter{}
+	case s.Tags != nil:
+		cfg.style.tags, cfg.style.tagsPre = compileTags(s.Tags)
+	case s.TagsEnabled != nil && cfg.style.tags == nil:
+		cfg.style.tags, cfg.style.tagsPre = compileTags(defaultBannedTags)
+	}
+
+	switch {
+	case s.Patterns != nil:
+		patterns, err := compilePatterns(s.Patterns, s.PatternsExtra)
+		if err != nil {
+			return fmt.Errorf("%sstyle.patterns: %w", where, err)
+		}
+		cfg.style.patterns = patterns
+	case s.UseDefaultPatterns != nil:
+		var base []BannedPattern
+		if *s.UseDefaultPatterns {
+			base = defaultBannedPatterns
+		}
+		patterns, err := compilePatterns(base, s.PatternsExtra)
+		if err != nil {
+			return fmt.Errorf("%sstyle.patterns: %w", where, err)
+		}
+		cfg.style.patterns = patterns
+	case len(s.PatternsExtra) > 0:
+		extra, err := compilePatterns(nil, s.PatternsExtra)
+		if err != nil {
+			return fmt.Errorf("%sstyle.patterns: %w", where, err)
+		}
+		cfg.style.patterns = append(cfg.style.patterns, extra...)
 	}
 	return nil
 }
 
-func (cfg *config) applyGodoc(s GodocSettings, p preset) {
-	on := boolOr(s.Enabled, p.godoc)
-	cfg.godoc = godocConfig{
-		enabled:        on,
-		startsWithName: on && boolOr(s.StartsWithName, true),
-		capitalized:    on && boolOr(s.Capitalized, true),
-		endsWithPeriod: on && boolOr(s.EndsWithPeriod, true),
-		reportsWhether: on && boolOr(s.ReportsWhether, true),
-		allSymbols:     s.Scope == "all" || (s.Scope == "" && p.godocAll),
+func (cfg *config) applyGodoc(s GodocSettings, where string) error {
+	cfg.godoc.enabled = boolOr(s.Enabled, cfg.godoc.enabled)
+	cfg.godoc.startsWithName = boolOr(s.StartsWithName, cfg.godoc.startsWithName)
+	cfg.godoc.capitalized = boolOr(s.Capitalized, cfg.godoc.capitalized)
+	cfg.godoc.endsWithPeriod = boolOr(s.EndsWithPeriod, cfg.godoc.endsWithPeriod)
+	cfg.godoc.reportsWhether = boolOr(s.ReportsWhether, cfg.godoc.reportsWhether)
+	switch s.Scope {
+	case "":
+	case "exported":
+		cfg.godoc.allSymbols = false
+	case "all":
+		cfg.godoc.allSymbols = true
+	default:
+		return fmt.Errorf("%sgodoc.scope: unknown scope %q: want exported or all", where, s.Scope)
 	}
+	return nil
 }

@@ -21,8 +21,8 @@ var (
 // prose, a colon when a list or a code block follows.
 const sentenceEnders = ".!?:"
 
-func (r *runner) checkGodoc(pass *analysis.Pass, fc *fileContext, info *commentInfo, sc *scratch) {
-	g := &r.cfg.godoc
+func checkGodoc(pass *analysis.Pass, fc *fileContext, info *commentInfo, sc *scratch) {
+	g := &fc.cfg.godoc
 	if !g.enabled {
 		return
 	}
@@ -129,8 +129,8 @@ func cutPrefix(s, prefix string) (string, bool) {
 
 // checkInlineBudget reports functions carrying more inline comments than the
 // budget allows.
-func (r *runner) checkInlineBudget(pass *analysis.Pass, fc *fileContext, counts []int) {
-	limit := r.cfg.maxInlinePerFunc
+func checkInlineBudget(pass *analysis.Pass, fc *fileContext, counts []int) {
+	limit := fc.cfg.maxInlinePerFunc
 	if limit <= 0 {
 		return
 	}

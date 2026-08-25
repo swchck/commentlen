@@ -9,4 +9,4 @@ plugins:
 
   # Published version: use this in a real project instead of the local path.
   # - module: github.com/swchck/commentlen
-  #   version: v0.1.1
+  #   version: v0.2.0

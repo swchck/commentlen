@@ -7,7 +7,7 @@ import (
 	"golang.org/x/tools/go/analysis"
 )
 
-func (r *runner) checkSize(pass *analysis.Pass, fc *fileContext, info *commentInfo, kc *kindConfig) {
+func checkSize(pass *analysis.Pass, fc *fileContext, info *commentInfo, kc *kindConfig) {
 	if kc.maxLines > 0 && info.counted > kc.maxLines {
 		pass.Reportf(info.overflowPos(fc, kc.maxLines),
 			"%s comment is %d lines long, max %d", info.kind, info.counted, kc.maxLines)
@@ -20,10 +20,10 @@ func (r *runner) checkSize(pass *analysis.Pass, fc *fileContext, info *commentIn
 		if l.directive || l.width <= kc.maxWidth {
 			continue
 		}
-		if l.codeBlock && r.cfg.ignoreCodeBlocks {
+		if l.codeBlock && fc.cfg.ignoreCodeBlocks {
 			continue
 		}
-		if r.cfg.ignoreURLs && overflowIsLink(l.raw, kc.maxWidth) {
+		if fc.cfg.ignoreURLs && overflowIsLink(l.raw, kc.maxWidth) {
 			continue
 		}
 		pass.Reportf(l.pos, "%s comment line is %d columns wide, max %d", info.kind, l.width, kc.maxWidth)
