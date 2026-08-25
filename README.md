@@ -85,7 +85,7 @@ name: golangci-lint-commentlen
 destination: ./bin
 plugins:
   - module: github.com/swchck/commentlen
-    version: v0.1.0
+    version: v0.1.1
 ```
 
 Then build it and enable the linter in `.golangci.yml`:
