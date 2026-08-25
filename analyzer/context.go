@@ -4,6 +4,8 @@ import (
 	"go/ast"
 	"go/token"
 	"sort"
+	"strings"
+	"unicode"
 )
 
 // docTarget is the declaration a doc comment belongs to.
@@ -15,6 +17,8 @@ type docTarget struct {
 	codeStart, codeEnd token.Pos
 	// boolFunc marks a function whose single result is bool.
 	boolFunc bool
+	// testFunc marks a test, benchmark or fuzz target, which godoc never shows.
+	testFunc bool
 }
 
 type span struct {
@@ -52,6 +56,10 @@ type fileContext struct {
 	funcs  []funcSpan
 	blocks []blockSpan
 
+	// testFile marks a _test.go file, where Test/Benchmark/Fuzz functions are
+	// exported by form only.
+	testFile bool
+
 	disabled     []span
 	fileDisabled bool
 }
@@ -73,6 +81,7 @@ func newFileContext(cfg *config, fset *token.FileSet, tf *token.File, src []byte
 		blocks:   sc.blocks[:0],
 		disabled: sc.disabled[:0],
 	}
+	fc.testFile = strings.HasSuffix(tf.Name(), "_test.go")
 	fc.collectDirectives()
 	if !fc.fileDisabled {
 		fc.walk()
@@ -194,6 +203,7 @@ func (fc *fileContext) addFunc(fd *ast.FuncDecl) {
 		codeStart: fd.Pos(),
 		codeEnd:   fd.End(),
 		boolFunc:  returnsBool(fd.Type),
+		testFunc:  fc.testFile && testFuncName(fd.Name.Name),
 	})
 }
 
@@ -357,6 +367,24 @@ func typeExported(expr ast.Expr) bool {
 		return typeExported(t.X)
 	case *ast.Ident:
 		return t.IsExported()
+	}
+	return false
+}
+
+// testFuncName reports whether the name is one `go test` picks up: TestXxx,
+// BenchmarkXxx, FuzzXxx or ExampleXxx, where Xxx does not start lower case.
+func testFuncName(name string) bool {
+	for _, prefix := range [...]string{"Test", "Benchmark", "Fuzz", "Example"} {
+		rest, ok := strings.CutPrefix(name, prefix)
+		if !ok {
+			continue
+		}
+		if rest == "" {
+			return true
+		}
+		if r := []rune(rest)[0]; !unicode.IsLower(r) {
+			return true
+		}
 	}
 	return false
 }

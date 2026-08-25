@@ -57,13 +57,16 @@ func (r *runner) checkGodoc(pass *analysis.Pass, fc *fileContext, info *commentI
 		want = "Package " + name
 	}
 	opensWithName := name != "" && opensWith(text, want)
+	// godoc never renders a test function, so "TestFoo_Bar verifies …" buys the
+	// reader nothing; the sentence rules still apply
+	conventional := !info.target.testFunc
 
-	if g.startsWithName && name != "" && !opensWithName {
+	if g.startsWithName && conventional && name != "" && !opensWithName {
 		pass.Reportf(first.pos, "doc comment should start with %q", want)
 	}
 	// an unexported symbol is documented by its own name, which starts lower
 	// case: "// f returns nothing." is correct and must not be capitalized
-	if g.capitalized && !opensWithName && wantsCapital(info.kind, name) {
+	if g.capitalized && conventional && !opensWithName && wantsCapital(info.kind, name) {
 		if r0 := []rune(text)[0]; unicode.IsLetter(r0) && unicode.IsLower(r0) {
 			pass.Reportf(first.pos, "doc comment should start with a capital letter")
 		}

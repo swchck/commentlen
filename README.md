@@ -241,9 +241,12 @@ godoc:
   scope: exported           # or "all", to include unexported symbols and fields
 ```
 
-`opensWith` accepts the usual variations: an article in front ("A Buffer is …"),
-the name used as a call ("Quote(s) returns …"), and a generic instantiation. A
-`package main` doc is left alone, since a command's doc opens with "Command foo".
+The naming and capitalization rules accept the usual variations: an article in
+front ("A Buffer is …"), the name used as a call ("Quote(s) returns …"), and a
+generic instantiation. Two cases are waived entirely, because godoc never renders
+them: a `package main` doc, whose convention is "Command foo", and the
+`Test`/`Benchmark`/`Fuzz`/`Example` functions of a `_test.go` file. The sentence
+rules — capital, final period — still apply there.
 
 ## Turning it off in source
 

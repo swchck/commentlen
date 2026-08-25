@@ -177,3 +177,42 @@ func F() {}
 	s.Godoc.Capitalized = ptr(false)
 	assertDiags(t, runSrc(t, s, "p.go", src), []string{"3:1: doc comment should end with a period"})
 }
+
+func TestGodocSkipsTestFunctions(t *testing.T) {
+	src := `package p
+
+// verifies that the parser keeps unknown keys.
+func TestParse_UnknownKeys(t *testing.T) {}
+
+// checks the fast path.
+func BenchmarkParse(b *testing.B) {}
+
+// drives the fuzzer.
+func FuzzParse(f *testing.F) {}
+
+// shows the usage.
+func ExampleParse() {}
+
+// helper builds a fixture.
+func helper() {}
+`
+	// naming and capitalization are waived, the sentence rules are not
+	if got := runSrc(t, godocOnly("all"), "p_test.go", src); len(got) != 0 {
+		t.Errorf("expected no diagnostics in a test file, got %v", got)
+	}
+
+	// the same names in a non-test file are ordinary symbols again
+	got := runSrc(t, godocOnly(""), "p.go", src)
+	if len(got) == 0 {
+		t.Error("outside _test.go the naming rule still applies")
+	}
+
+	// a missing period is still reported inside a test file
+	missingPeriod := `package p
+
+// verifies the parser
+func TestParse(t *testing.T) {}
+`
+	assertDiags(t, runSrc(t, godocOnly("all"), "p_test.go", missingPeriod),
+		[]string{"3:1: doc comment should end with a period"})
+}
